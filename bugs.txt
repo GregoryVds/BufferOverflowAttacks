@@ -1,0 +1,103 @@
+#
+# [file:#lines]
+# desc
+#
+
+[zookd.c:63]
+The "static char env[8192]" variable may be overflown when used in the function
+"http_request_line", which is called on line 70:
+
+    <if ((errmsg = http_request_line(fd, reqpath, env, &env_len)))>
+
+In http.c:95, we copy the string contained in "sp2" to this "env[8192]" array
+without checking the bounds. The same happens on line 101 when we copy the string
+contained in "qp" to this "env[8192]".
+
+Neither "sp2", nor "qp" could by themselves be longer than 8192 bytes, since they are substrings of the variable "static char buf[8192]" variable defined on line
+66, and this buffer is protected from overflowing.
+
+However, the first line of the request (contained in "buf") is split into 3
+parts that will serve as env variables before being copied into "env". For each
+of the 3 values, we prepend the value name ("REQUEST_METHOD=", "SERVER_PROTOCOL=",
+"QUERY_STRING="). So even if the original string was 8192 bytes long, we could
+overflow the buffer by 44 bytes due to these variables names.
+
+We could simply make a request containing a very long protocol version (instead
+of "HTTP/1.1" for example) to exploit this overflow.
+
+This vulnerability cannot be protected using stack canaries since "env" does not
+reside on the stack but in the data segment.
+
+[zookd.c:65]
+The "char reqpath[2048]" variable may be overflown when used in the function
+"http_request_line", which is called on line 70:
+
+    <if ((errmsg = http_request_line(fd, reqpath, env, &env_len)))>
+
+In http.c:105, the call to "url_decode(reqpath, sp1);" may cause this overflow.
+The url_decode function will copy the target URI from the HTTP request into
+"reqpath" without paying attention to the size of "reqpath". The URI could be
+about 8000 bytes long and clearly overflow the buffer.
+
+We could simply make a request containing a very long target URI to exploit this
+vulnerability.
+
+This vulnerability can be protected using stack canaries.
+
+[zookfs.c:28]
+The "char envp[8192]" variable may be overflown when used in the function
+"recvfd", which is called on line 33:
+
+    <if ((recvfd(fd, envp, sizeof(envp), &sockfd) <= 0) || sockfd < 0)>
+
+If the buffer "static char env[8192];" in zookd.c:63 was overflown as explained
+in the first vulnerability, then "static size_t env_len;" in zookd.c:64 would be longer than 8192, and the parameters "env_len" to call "sendfd" in zookdk:86
+would also be longer than 8192 (As explained earlier, this overflow is limited
+to 44 bytes of overflow).
+
+As a result, the "recvfd" call will copy more than 8192 bytes into "envp" and
+overflow the buffer.
+
+We could overflow this buffer by making the first line of the HTTP request very
+long (but since this implies first an overflow on "env[8192]" in zookd.c:63,
+the first overflow could already have messed up some data in the data segments
+which could results in some weird behavior).
+
+This vulnerability can be protected using stack canaries.
+
+[http.c:120]
+The "char value[512]" variable may be overflown when used in the function
+"url_decode", which is called on line 159:
+
+    <url_decode(value, sp);>
+
+Using an HTTP header value longer than 512 characters (after unescaping) will overflow this buffer. So we could exploit it by simply using long header values.
+
+This vulnerability can be protected using stack canaries.
+
+[http.c:121]
+The "char envvar[512]" variable may be overflown when used in the function
+"sprintf", which is called on line 165:
+
+    <sprintf(envvar, "HTTP_%s", buf);>
+
+The buffer will overflow if the header name is longer than 507 characters. So
+we could exploit it by using long header names.
+
+This vulnerability can be protected using stack canaries.
+
+[http.c:276]
+The "char pn[1024]" variable may be overflown when used in the function
+"strcat", which is called on line 281:
+
+    <strcat(pn, name);>
+
+The argument "name" is the HTTP request URI, which has been set as an environment
+variable previously. As explained in the previous vulnerabilities, this URI could
+be much larger than 1024 characters long (about 8000) and could overflow the
+"pn" buffer.
+
+We could simply make a request containing a very long URI which will overflow
+the buffer.
+
+This vulnerability can be protected using stack canaries.
