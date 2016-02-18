@@ -443,8 +443,6 @@ void url_decode(char *dst, const char *src)
             hexbuf[0] = src[1];
             hexbuf[1] = src[2];
             hexbuf[2] = '\0';
-            // QUESTION: Copie base 10 number into dest, byt strtol returns a
-            // long... So should advance dst by more than ++ ?
             *dst = strtol(&hexbuf[0], 0, 16);
             src += 3;
         }

@@ -74,7 +74,6 @@ static void process_client(int fd)
     {
         if (!regexec(&svcurls[i], reqpath, 0, 0, 0))
         {
-            // BUG: TODO, check for vulnerability in format string...
             warnx("Forward %s to service %d", reqpath, i + 1);
             break;
         }
