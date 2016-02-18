@@ -20,7 +20,14 @@
 
 	movb	$SYS_unlink,%al		/* syscall arg 1: syscall number */
 	movl	%esi,%ebx		/* syscall arg 2: string pathname */
+
+	movl $0x08, %eax
+	movl $0x02, %ecx
+	orl %ecx, %eax
 	int	$0x80			/* invoke syscall */
+
+	movl $x10, %eax
+	int	$0x80
 
 	xorl	%ebx,%ebx		/* syscall arg 2: 0 */
 	movl	%ebx,%eax
