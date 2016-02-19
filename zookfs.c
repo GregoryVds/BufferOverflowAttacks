@@ -25,6 +25,8 @@ int main(int argc, char **argv)
 
     for (;;)
     {
+        // This buffer may not be overflown any more since the env[8192] buffer
+        // from zookd.c:63 is now protected from overflows.
         char envp[8192];
         int sockfd = -1;
         const char *errmsg;

@@ -61,7 +61,7 @@ int http_read_line(int fd, char *buf, size_t size)
     return -1;
 }
 
-const char *http_request_line(int fd, char *reqpath, char *env, size_t *env_len)
+const char *http_request_line(int fd, char *reqpath, char *env, size_t *env_len, int env_buf_size, int reqpath_buf_size)
 {
     static char buf[8192];      /* static variables are not on the stack */
     char *sp1, *sp2, *qp, *envp = env;
@@ -91,34 +91,66 @@ const char *http_request_line(int fd, char *reqpath, char *env, size_t *env_len)
     if (strcmp(buf, "GET") && strcmp(buf, "POST"))
         return "Unsupported request (not GET or POST)";
 
-    envp += sprintf(envp, "REQUEST_METHOD=%s", buf) + 1;
-    envp += sprintf(envp, "SERVER_PROTOCOL=%s", sp2) + 1;
+    /* We start building the env, without exceeding env_buf_size
+       Checks for REQUEST_METHOD and SERVER_NAME are optional, but I add them
+       for consistency in case we would like to extend the code in the future.
+    */
+    int copied = 0;
+
+    int request_method_size = snprintf(envp, env_buf_size-copied, "REQUEST_METHOD=%s", buf);
+    if (request_method_size >= env_buf_size-copied)
+        return "Unsupported request method";
+
+    envp += request_method_size+1;
+    copied += request_method_size+1;
+
+    int protocol_size = snprintf(envp, env_buf_size-copied, "SERVER_PROTOCOL=%s", sp2);
+    if (protocol_size >= env_buf_size-copied)
+        return "Unsupported server protocol";
+
+    envp += protocol_size+1;
+    copied += protocol_size+1;
 
     /* parse out query string, e.g. "foo.py?user=bob" */
     if ((qp = strchr(sp1, '?')))
     {
         *qp = '\0';
-        envp += sprintf(envp, "QUERY_STRING=%s", qp + 1) + 1;
+        int query_string_size = snprintf(envp, env_buf_size-copied, "QUERY_STRING=%s", qp + 1);
+        if (query_string_size >= env_buf_size-copied)
+            return "Query string too long";
+
+        envp += query_string_size+1;
+        copied += query_string_size+1;
     }
 
     /* decode URL escape sequences in the requested path into reqpath */
-    url_decode(reqpath, sp1);
+    url_decode(reqpath, sp1, reqpath_buf_size);
 
-    envp += sprintf(envp, "REQUEST_URI=%s", reqpath) + 1;
+    int request_uri_size = snprintf(envp, env_buf_size-copied, "REQUEST_URI=%s", reqpath);
+    if (request_uri_size >= env_buf_size-copied)
+        return "Request URI too long";
 
-    envp += sprintf(envp, "SERVER_NAME=zoobar.org") + 1;
+    envp += request_uri_size+1;
+    copied += request_uri_size+1;
 
-    *envp = 0;
-    *env_len = envp - env + 1;
+    int server_name_size = snprintf(envp, env_buf_size-copied, "SERVER_NAME=zoobar.org");
+    if (server_name_size >= env_buf_size-copied)
+        return "Request line too long";
+
+    copied += request_uri_size+1;
+    *env_len = copied;
     return NULL;
 }
+
+#define VALUE_BUF_SIZE 512
+#define ENVVAR_BUF_SIZE 512
 
 const char *http_request_headers(int fd)
 {
     static char buf[8192];      /* static variables are not on the stack */
     int i;
-    char value[512];
-    char envvar[512];
+    char value[VALUE_BUF_SIZE];
+    char envvar[ENVVAR_BUF_SIZE];
 
     /* For lab 2: don't remove this line. */
     touch("http_request_headers");
@@ -156,13 +188,17 @@ const char *http_request_headers(int fd)
         }
 
         /* Decode URL escape sequences in the value */
-        url_decode(value, sp);
+        url_decode(value, sp, VALUE_BUF_SIZE);
 
         /* Store header in env. variable for application code */
         /* Some special headers don't use the HTTP_ prefix. */
         if (strcmp(buf, "CONTENT_TYPE") != 0 &&
             strcmp(buf, "CONTENT_LENGTH") != 0) {
-            sprintf(envvar, "HTTP_%s", buf);
+
+            int copied = snprintf(envvar, ENVVAR_BUF_SIZE, "HTTP_%s", buf);
+            if (copied >= ENVVAR_BUF_SIZE)
+                return "Header parse error (4)";
+
             setenv(envvar, value, 1);
         } else {
             setenv(buf, value, 1);
@@ -270,15 +306,17 @@ valid_cgi_script(struct stat *st)
     return 1;
 }
 
+#define PN_BUF_SIZE 1024
+
 void http_serve(int fd, const char *name)
 {
     void (*handler)(int, const char *) = http_serve_none;
-    char pn[1024];
+    char pn[PN_BUF_SIZE];
     struct stat st;
 
     getcwd(pn, sizeof(pn));
     setenv("DOCUMENT_ROOT", pn, 1);
-    strcat(pn, name);
+    strncat(pn, name, PN_BUF_SIZE-1);
     split_path(pn);
 
     if (!stat(pn, &st))
@@ -339,24 +377,26 @@ void http_serve_file(int fd, const char *pn)
     close(filefd);
 }
 
-void dir_join(char *dst, const char *dirname, const char *filename) {
-    strcpy(dst, dirname);
+void dir_join(char *dst, const char *dirname, const char *filename, int dst_buf_size) {
+    strncpy(dst, dirname, dst_buf_size-2); // -1 for "/" AND -1 for /0
     if (dst[strlen(dst) - 1] != '/')
         strcat(dst, "/");
-    strcat(dst, filename);
+    strncat(dst, filename, dst_buf_size-strlen(dst)-1);
 }
+
+#define NAME_BUF_SIZE 1024
 
 void http_serve_directory(int fd, const char *pn) {
     /* for directories, use index.html or similar in that directory */
     static const char * const indices[] = {"index.html", "index.php", "index.cgi", NULL};
-    char name[1024];
+    char name[NAME_BUF_SIZE];
     struct stat st;
     int i;
 
     for (i = 0; indices[i]; i++) {
-        dir_join(name, pn, indices[i]);
+        dir_join(name, pn, indices[i], NAME_BUF_SIZE);
         if (stat(name, &st) == 0 && S_ISREG(st.st_mode)) {
-            dir_join(name, getenv("SCRIPT_NAME"), indices[i]);
+            dir_join(name, getenv("SCRIPT_NAME"), indices[i], NAME_BUF_SIZE);
             break;
         }
     }
@@ -433,9 +473,10 @@ void http_serve_executable(int fd, const char *pn)
     }
 }
 
-void url_decode(char *dst, const char *src)
+void url_decode(char *dst, const char *src, int buf_size)
 {
-    for (;;)
+    int copied = 0;
+    while (copied < buf_size)
     {
         if (src[0] == '%' && src[1] && src[2])
         {
@@ -459,7 +500,7 @@ void url_decode(char *dst, const char *src)
             if (*dst == '\0')
                 break;
         }
-
+        copied++;
         dst++;
     }
 }

@@ -58,16 +58,19 @@ int main(int argc, char **argv)
     }
 }
 
+#define ENV_BUF_SIZE 8192
+#define REQPATH_BUF_SIZE 2048
+
 static void process_client(int fd)
 {
-    static char env[8192];  /* static variables are not on the stack */
+    static char env[ENV_BUF_SIZE];  /* static variables are not on the stack */
     static size_t env_len;
-    char reqpath[2048];
+    char reqpath[REQPATH_BUF_SIZE];
     const char *errmsg;
     int i;
 
     /* get the request line */
-    if ((errmsg = http_request_line(fd, reqpath, env, &env_len)))
+    if ((errmsg = http_request_line(fd, reqpath, env, &env_len, ENV_BUF_SIZE, REQPATH_BUF_SIZE)))
         return http_err(fd, 500, "http_request_line: %s", errmsg);
 
     for (i = 0; i < nsvcs; ++i)

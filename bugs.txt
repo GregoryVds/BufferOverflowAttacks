@@ -98,6 +98,20 @@ be much larger than 1024 characters long (about 8000) and could overflow the
 "pn" buffer.
 
 We could simply make a request containing a very long URI which will overflow
+the buffer. Then, we have two choices:
+    - We can overwrite the return address of the stack frame. This vulnerability
+    can be protected using stack canaries.
+    - We can overwrite the void(*handler) pointer to make the program execute a
+    function of our choosing. This vulnerability cannot be protected using stack
+    canaries.
+
+[http.c:353]
+The "char name[1024];" variable may be overflown when used in the function
+"dir_join" called on line 358:
+
+    <dir_join(name, pn, indices[i], NAME_BUF_SIZE);>
+
+We could simply make a request containing a very long URI which will overflow
 the buffer.
 
 This vulnerability can be protected using stack canaries.
