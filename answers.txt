@@ -1,1 +1,31 @@
-## Place your answers here.
+A first vulnerability is that an attacker can download any file present of the
+server (if the attacker knows the path to that file). For example, if the
+attacker wants to retrieve "/etc/passwd", he can simply make a get request for
+"/../etc/passwd". This vulnerability arises form the fact that the server is
+ready to serve any file without any restriction on the path. We could fix this
+issue for example by preventing ".." in the path to the file in order to limit
+this file-serving feature to files that are inside the "/project1" directory.
+A cleaner fix would be to "chroot" the zookfs process to some directory that
+holds all the files supposed to be accessible. This changes the apparent root
+directory for the process and ensure that it cannot access any file outside that
+directory.
+
+A second related vulnerability is that an attacker can execute any program
+present on the server. This vulnerability arises form the fact that the server
+is willing to "serve" any executable without restriction on the path. However,
+a limitation of this vulnerability is that the attacker cannot control the
+arguments to the executable. But this is already a large vulnerability: the
+attacker could for instance execute the "poweroff" binary that does not require
+any argument to be useful. Similarly to the first vulnerability, we could fix
+this issue for example by preventing ".." in the path to the executable or
+"chroot" the zookfs process to an appropriate directory.
+
+A third vulnerability is that an attacker can easily provoke a DDOS attack by
+simply omitting the \r\n" at the end of the first line of the HTTP request. With
+such a request, the call "read" in "http_read_line" will block [http.c:36]. Then
+, the server will not accept any new incoming connection, effectively making the
+server unavailable for all other users. To fix this vulnerability, we could
+replace the call to read by a smarter non blocking call and handle this case.
+Another solution would be to fork before reading the request_line (but we should
+still take care of this issue in order to prevent the attacker from creating
+many "zombie" processes on the server which consume memory).
